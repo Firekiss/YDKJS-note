@@ -273,7 +273,7 @@ var a = 2;
 
 ## 块儿作为作用域
 
-虽然函数时最常见的作用域单位，而且当然也是在世界上流通的绝大多数js中最为广泛传播的设计方式，但是其他的作用域单位也是可能的，而且使用这些作用域单位可以导致更好、对于维护来说更干净的代码。
+虽然函数时最常见的作用域单位，而且当然也是在世界上流通的绝大多数js中最为广泛传播的设计方式，但是其他的作用域单位也是可能的，而且使用这些作用域单位可以导致更好、对于维护来说更干净的代码。
 
 JavaScript之外的许多其他语言都支持块儿作用域，所以有这些语言背景的开发者习惯于这种 思维模式，然而那些主要在JavaScript中工作的开发者可能会发现这个概念有些陌生。
 
@@ -365,4 +365,165 @@ if(foo){
 console.log(bar); // ReferenceError
 ```
 
-使用`let`将一个变量附着在一个现存的块儿上有些隐晦。它可能会使人困惑---在你
+使用`let`将一个变量附着在一个现存的块儿上有些隐晦。它可能会使人困惑---在你开发和设计代码时，如果你不仔细注意哪些块儿的作用域包含了变量，并且习惯于将块儿四处移动，将它们包进其他的块儿中，等等。
+
+为块儿作用域创建明确的块儿可以解决这些问题中的一些，使变量附着在何处更加明显。通常来说，明确的代码要比隐晦或微妙的代码好。这种明确的块儿作用域风格很容易达成，而且他与块儿作用域在其他语言中的工作方式匹配得更自然：
+
+```js
+var foo = true;
+
+if(foo){
+  { // 明确的块儿
+    let bar = foo * 2；
+    bar = something(bar);
+    console.log(bar);
+  }
+}
+
+console.log(bar); //ReferenceError
+```
+
+我们可以在一个语句是合法文法的任何地方，通过简单地引入一个{..}来为`let`创建一个任意的可以绑定的块儿。在这个例子中，我们在if语句内部制造了一个明确的块儿，在以后的重构中将整个块儿四处移动可能会更容易，而且不会影响外围的if语句的位置和语义。
+
+然而,使用`let`做出的声明将不会它们所出现的整个块儿的作用域中提升。如此，直到声明语句为止，声明将不会存在于块儿中。
+
+```js
+{
+  console.log(bar); // ReferrenceError!
+  let bar = 2;
+}
+```
+
+## 垃圾回收
+
+块儿作用域的另一个有用之处是关于闭包和释放内存的垃圾回收。我们将简单地在这里展示一下。
+
+考虑这段代码:
+
+```js
+function process(data){
+  // 做些有趣的事情
+}
+
+var someReallyBigData = {..};
+
+process(someReallyBigData);
+
+var btn = document.getElementById("my_button");
+
+btn.addEventListener("click", function click(evt){
+  console.log("button clicked");
+}, false);
+```
+
+点击事件的处理器回调函数`click`根本不需要`someReallyBigData`变量。这意味着从理论上讲，在`process(..)`运行之后，这个消耗巨大内存的数据结构可以被作为垃圾回收。然而，JS引擎很可能(虽然这要看具体实现)仍然将这个结构保持一段时间，因为`click`函数在整个作用域上拥有一个闭包。
+
+块儿作用域可以解决这个问题，使引擎清楚地知道它不必再保持`someReallyBigData`了：
+
+```js
+function process(data){
+  // 做一些有趣的事
+}
+
+// 在运行后，任何定义在这个块中的东西都可以消失了
+{
+  let someReallyBigData = {..};
+  process(someReallyBigData);
+}
+
+var btn = document.getElementById( "my_button" );
+
+btn.addEventListener( "click", function click(evt){
+	console.log("button clicked");
+}, /*capturingPhase=*/false );
+```
+
+声明可以将变量绑定在本地的明确的块儿是一种强大的工具。
+
+## let循环
+
+一个使`let`闪光的特殊例子就是我们先前讨论的for循环。
+
+```js
+for(let i=0;i<10;i++){
+  console.log(i);
+}
+console.log(i); // ReferenceError
+```
+
+在for循环头部的`let`不仅将`i`绑定在for循环中，而且实际上，它会对每一次循环的迭代**重新绑定i**,确保它被赋予来自上一次循环迭代末尾的值。
+
+这是描绘这种为每次迭代进行绑定的行为的另一种方式：
+
+```js
+{
+  let j;
+  for(j=0; j<10; j++){
+    let i = j; // 每次迭代都重新绑定
+    console.log(i);
+  }
+}
+```
+
+因为`let`声明附着于任意的块儿，而不是外围的函数作用域(或全局)，所以在重构代码时可能会有些坑需要额外小心：现存的代码拥有对函数作用域的`var`声明有隐藏的依赖，但你想要用`let`来取代`var`。
+
+```js
+var foo = true, baz = 10;
+
+if(foo){
+  var bar = 3;
+
+  if(baz > bar){
+    console.log(baz);
+  }
+}
+```
+
+这段代码可以相当容易地重构为：
+
+```js
+var foo = true,baz = 10;
+
+if(foo){
+  var bar = 3;
+
+  // ...
+}
+
+if(baz > bar){
+  console.log(baz);
+}
+```
+
+但是，当使用块儿作用域变量时要小心这样的变化：
+
+```js
+var foo = true, baz = 10;
+
+if(foo){
+  let bar = 3;
+
+  if(baz > bar){ // <-- 移动时不要忘了`bar`
+    console.log(baz);
+  }
+}
+```
+
+## const
+
+除了`let`之外，ES6还引入了`const`，它也创建一个块儿作用域变量，但是它的值是固定的(常量)。任何稍后的改变它的企图都将导致错误。
+
+```js
+var foo = true;
+
+if(foo){
+  var a = 2;
+  const b = 3; // 存在于包含它的`if`作用域中
+
+  a = 3; //没问题
+  b = 4; //错误
+}
+
+console.log(a); //2
+console.log(b); // ReferenceError!
+```
