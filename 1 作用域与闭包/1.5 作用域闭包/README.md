@@ -145,7 +145,7 @@ wait("Hello, closure!");
 
 我们拿来一个内部函数(名为`timer`)将它传递给`setTimeout(..)`。但是`timer`拥有覆盖`wait(..)`的作用域的闭包，实际上保持并使用着对变量`message`的引用。
 
-在我们执行`wait(..)`一千毫秒之后，要不是内部函数，要不是内部函数`timer`依然覆盖着`wait()`内部作用域的闭包，它早就会消失了。
+在我们执行`wait(..)`一千毫秒之后，要不是内部函数`timer`依然覆盖着`wait()`内部作用域的闭包，它早就会消失了。
 
 在引擎的内脏深处，内建的工具`setTimeout(..)`拥有一些参数的引用，可能称为`fn`或者`func`或者其他诸如此类的东西。引擎去调用这个函数，它调用我们内部`timer`函数，而词法作用域依然完好无损。
 
@@ -178,3 +178,365 @@ var a = 2;
 
 虽然IIFE本身不是一个闭包的例子，但是它绝对创建了作用域，而且它是我们用来创建可以被闭包的作用域的最常见工具之一。所以IIFE确实与闭包有强烈的关联，即使他们本身不行使闭包。
 
+## 循环 + 闭包
+
+用来展示闭包最常见最权威的例子就是老实巴交的for循环
+
+```js
+for(var i=1;i<=5;i++){
+  setTimeout(function timer(){
+    console.log(i);
+  }, i*1000);
+}
+```
+
+**注意**：当你讲函数放在循环内部时Linter经常会抱怨，因为不理解闭包的错误**在开发者中太常见了**。我们在这里讲解如何正确地利用闭包的全部力量。但是Linter通常不理解这样的微妙之处，所以他们不管怎样都将抱怨，认为你实际上不知道你在做什么。
+
+这段代码的精神是，我们一般将期待它的行为分别是打印数字"1","2",...."5",一次一个，一秒一个。
+
+实际上，如果你运行这段代码，你会得到"6"被打印5次，一秒一个。
+
+啊？
+
+首先，让我们解释一下"6"是从哪里来的。循环的终结条件是`i`不`<=5`。第一次满足这个条件时`i`是6。所以，输出的结果反映的是`i`在循环终结后的最终值。
+
+如果多看两眼的话这其实很明显。超时的回调函数都将在循环的完成之后立即运行。实际上，就计时器而言，即便在每次迭代中它是`setTomeout(..,0)`,所有这些回调函数也都仍然是严格地在循环之后运行的，因此每次都打印`6`。
+
+但是这里有个更深刻的问题。要是想让它实际上如我们在语义上暗示的那样动作，我们的代码缺少了什么？
+
+缺少的东西是，我们试图暗示在迭代期间，循环的每次迭代都"捕捉"一份对`i`的拷贝。但是，虽然所有这5个函数在每次循环迭代中分离的定义，由于作用域的工作方式，他们**都闭包在同一个共享的全局作用域上**，而它事实上只有一个`i`。
+
+这么说来，所有函数共享一个指向相同的`i`的引用是理所当然的。循环结构的某些东西往往迷惑我们，使我们认为这里有其他更精巧的东西在工作。但是这里没有。这与根本没有循环，5个超时回调仅仅一个接一个地被声明没有区别。
+
+好了，那么，回到我们火烧眉毛的问题，缺少了什么？我们需要更多被闭包的作用域。明确地说，我们需要为循环的每次迭代都准备一个新的被闭包的作用域。
+
+```js
+for(var i=1;i<=5;i++){
+  (function(){
+    setTimeout(function timer(){
+      console.log(i);
+    }, i*1000);
+  })();
+}
+```
+
+不好用。但是为什么？很明显我们现在有了更多的词法作用域。每个超时回调函数确实闭包在每次迭代时分别被每个IIFE创建的作用域中。
+
+拥有一个被闭包的**空的作用域**是不够的。仔细观察。我们的IIFE只是一个空的什么也不做的作用域。它内部需要一些东西才能变得对我们有用。
+
+它需要它自己的变量，在每次迭代时持有值`i`的一个拷贝。
+
+```js
+for(var i=1; i<=5;i++){
+  (function(){
+    var j=i;
+    setTimeout(function timer(){
+      console.log(j);
+    }, j*1000);
+  })();
+}
+```
+
+有些人偏好一种稍稍变形的形式：
+
+```js
+for(var i =1;i<=5;i++){
+  (function(j){
+    setTimeout(function timer(){
+      console.log(j);
+    }, j*1000);
+  })(i)
+}
+```
+
+当然，因为这些IIFE只是函数，我们可以传入`i`,如果我们乐意的话可以称它为`j`,或者我们甚至可以再次称它为`i`。不管哪种方式，这段代码都能工作。
+
+在每次迭代内部使用的IIFE为每次迭代创建了新的作用域，这给了我们的超时回调函数一个机会，在每次迭代时闭包一个新的作用域，这些作用域的每一个都拥有一个持有正确的迭代值的变量给我们访问。
+
+## 重温块作用域
+
+仔细观察我们前一个解决方案的分析。我们使用了一个IIFE来在每一次迭代中创建新的作用域。换句话说，我们实际上每次迭代都需要一个**块儿作用域**。我们在第三章展示了`let`声明，它劫持一个块儿并且就在这个块儿中声明一个变量。
+
+**这实质上将块儿变成了一个我们可以闭包的作用域**。所以接下来的牛逼代码"就是要用":
+
+```js
+for(var i=1; i<=5; i++){
+  let j = i; // 给闭包的块儿作用域
+  setTimeout( function timer(){
+    console.log(j);
+  }, j*1000);
+}
+```
+
+但是，这还不是全部，在用于for循环头部的`let`声明被定义了一种特殊行为。这种行为说，这个变量不是只为循环声明一次，**而是为每次迭代声明一次**。并且，它将在每次后续的迭代中被上一次迭代末尾的值初始化。
+
+```js
+for(let i=1;i<=5;i++){
+  setTimeout(function timer(){
+    console.log(i);
+  }, i*1000);
+}
+```
+
+## 模块
+
+还有其他的代码模式利用了闭包的力量，但是它们都不像回调那样浮于表面。让我们来检视他们中最强大的一种：模块。
+
+```js
+function foo(){
+  var something = "cool";
+  var another = [1,2,3];
+
+  function doSomething(){
+    console.log(something);
+  }
+
+  function doAnother(){
+    console.log(another.join("!"));
+  }
+}
+```
+
+就现在这段代码来说，没有发生明显地闭包。我们只是拥有一些私有数据变量`something`和`another`,以及几个内部函数`doSomething()`和`doAnother()`,它们都拥有覆盖在`foo()`内部作用域上的词法作用域(因此是闭包!)。
+
+但是现在考虑这段代码：
+
+```js
+function CoolModule(){
+  var something = "cool";
+  var another = [1,2,3];
+
+  function doSomething(){
+    console.log(something);
+  }
+
+  function doAnother(){
+    console.log(another.join("!"));
+  }
+
+  return {
+    doSomething: doSomething,
+    doAnthother: doAnother
+  };
+}
+
+var foo = CoolModule();
+
+foo.doSomething(); // cool
+foo.doAnother(); // 1!2!3
+```
+
+在JavaScript中我们称这种模式为模块。实现模块模式的最常见方法经常被称为"揭示模块",它是我们在这里展示的方式的变种。
+
+让我们检视关于这段代码的一些事情。
+
+首先，`CoolModule()`只是一个函数，但它必须被调用才能成为一个被创建的模块实例。没有外部函数的执行，内部作用域的创建和闭包都不会发生。
+
+第二，`CollModule()`函数返回一个对象，通过对象字面量语法`{key: value, ...}`标记。这个我们返回的对象拥有指向我们内部函数的引用，但是没有指向我们内部数据变量的引用。我们可以将它们保持为隐藏和私有的。可以很恰当地认为这个返回值对象实质上是一个**我们模块的公有API**。
+
+这个返回值对象最终被赋予给外部变量`foo`，然后我们可以在这个API上访问那些属性，比如`foo.doSomething()`。
+
+**注意**：从我们的模块中返回一个实际的对象(字面量)不是必须的。我们可以仅仅直接返回一个内部函数。jQuery就是一个很好的例子。`jQuery`和`$`标识符是jQuery"模块"的公有API，但是它们本身只是一个函数(这个函数本身可以有属性，因为所有的函数都是对象)。
+
+`doSomething()`和`doAnother()`函数拥有模块"实例"内部作用域的闭包(通过实际调用`CoolModule()`得到的)。当我们通过返回值对象的属性引用，将这些函数传送到词法作用域外部时，我们就建立好了可以观察和行使闭包的条件。
+
+更简单地说，行使模块模式有两个"必要条件"：
+
+1. 必须有一个外部的外围函数，而且它必须至少被调用一次(每次创建一个新的模块实例)。
+2. 外围的函数必须至少返回一个内部函数，这样这个内部函数才拥有私有作用域的闭包，并且可以访问和/或修改这个私有状态。
+
+一个仅带有一个函数属性的对象不是真正的模块。从可观察的角度来看，一个从函数调用中返回的对象，仅带有数据属性而没有闭包的函数，也不是正真的模块。
+
+上面的代码段展示了一个称为`CoolModule()`独立的模块创建器，它可以被调用任意多次，每次创建一个新的模块实例。这种模式的一个稍稍的变化是当你只想要一个实例的时候，某种"单例"：
+
+```js
+var foo = (function CoolModule(){
+  var something = "cool";
+  var another = [1,2,3];
+
+  function doSomething(){
+    console.log(something);
+  }
+
+  function doAnother(){
+    console.log(another.join("!"));
+  }
+
+  return {
+    doSomething: doSomething,
+    doAnother: doAnother
+  };
+})();
+```
+
+这里，我们将模块放进一个IIFE钟，而且我们立即调用它，并且把他的返回值直接赋值给我们单独的模块实例标识符`foo`。
+
+模块只是函数，所以它们可以接受参数：
+
+```js
+function CoolModule(id){
+  function identify(){
+    console.log(id);
+  }
+
+  return {
+    identify: identify
+  }
+}
+
+var foo1 = CoolModule("foo 1");
+var foo2 = CoolModule("foo 2");
+
+foo1.identify(); // "foo 1"
+foo2.identify(); // "foo 2"
+```
+
+另一种在模块模式上微小但是强大的变化是，为你作为公有API返回的对象命名：
+
+```js
+var foo = (function CoolModule(id){
+  function change(){
+    // 修改公有api
+    publicAPI.identify = identify2;
+  }
+
+  function identify1(){
+    console.log(id);
+  }
+
+  function identify2(){
+    console.log(id.toUpperCase());
+  }
+
+  var publicAPI = {
+    change:change,
+    identify: identify1
+  };
+
+  return publicAPI;
+})("foo module");
+
+foo.identify(); // foo module
+foo.change();
+foo.identify(); // FOO MODULE
+```
+
+通过在模块实例内部持有一个指向公有API对象的内部引用，你可以**从内部**修改这个模块，包括添加和删除方法，属性，和改变它们的值。
+
+## 现代的模块
+
+各种模块依赖加载器/消息机制实质上都是将这种模块定义包装进一个友好的API。与其检视任意一个特定的库，不如让我**(仅)为了说明的目的**展示一个非常简单的概念证明：
+
+```js
+var MyModules = (function Manager(){
+  var modules = {};
+
+  function define(name, deps, impl){
+    for(var i=0;i<deps.length;i++){
+      deps[i] = modules[deps[i]];
+    }
+    modules[name] = impl.apply(impl, deps);
+  }
+
+  function get(name){
+    return modules[name];
+  }
+
+  return {
+    define: define,
+    get: get
+  };
+})();
+```
+
+这段代码的关键部分是`modules[name] = impl.apply(impl, deps)`。这为一个模块调用了它的定义的包装函数(传入所有依赖)，并将值返回，也就是模块API,存储到一个用名称追踪的内部模块列表中。
+
+这里是我们可能如何使用它来定义一个模块：
+
+```js
+MyModules.define("bar", [], function(){
+  function hello(who){
+    return "Let me introduce:" + who;
+  }
+
+  return {
+    hello: hello
+  };
+});
+
+myModules.define("foo", ["bar"], function(bar){
+  var hungry = "hippo";
+
+  function awesome(){
+    console.log(bar.hello(hungry).toUpperCase());
+  }
+
+  return {
+    awesome:awesome
+  };
+});
+
+var bar = MyModules.get("bar");
+var foo = MyModules.get("foo");
+
+console.log(bar.hello("hippo")); // Let me introduce: hippo
+
+foo.awesome();  // LET ME INTRODUCE: HIPPO
+```
+
+模块"foo"和"bar"都使用一个返回公有API的函数来定义。"foo"甚至接收一个"bar"的实例作为依赖参数，并且可以因此使用它。
+
+花些时间检视这些代码段，来完全理解闭包的力量付诸实践给我们带来的好处。关键之处在于，对于模块管理器来说真的没有什么特殊的魔法。它们只是满足与我在上面列出的模块模式的两个性质：调用一个函数定义包装器，并将它的返回值作为这个模块的API保存下来。
+
+换句话说，模块就是模块，即便你在它们上面放了一个友好的包装工具。
+
+## 未来的模块
+
+ES6为模块的概念增加了头等的语法支持。当通过模块系统加载时，ES6将一个文件视为一个独立的模块。每个模块可以导入其他的模块挥着特定的API成员。也可以导出它们自己的公有API成员。
+
+**注意**：基于函数的模块不是一个可以被静态识别的模式(编辑器知道的东西)，所以它们的API语义直到运行时才会被考虑。也就是，你实际上可以在运行期间修改模块的API(参见早先`publicAPI`的讨论)。
+
+相比之下，ES6模块API是静态的(这些API不会在运行时改变)。因为编译器知道他，它可以(也确实在这么做！)在(文件加载和)编译期间检查一个指向被导入模块的成员的引用是否实际存在。如果API引用不存在，编译器就会在编译时抛出一个"早起"错误，而不是等待传统的动态运行时解决方案。
+
+ES6**没有**"内联"格式，它们必须被定义一个分离的文件中(一个模块一个)。浏览器/引擎拥有一个默认的"模块加载器"，它在模块被导入时同步地加载块文件。
+
+bar.js
+
+```js
+function hello(who){
+  return "Let me introduce: " + who;
+}
+
+export hello;
+```
+
+foo.js
+
+```js
+// 仅导入"bar"模块中的`hello()`
+import hello from "bar";
+
+var hungry = "hippo";
+
+function awesome(){
+  console.log(hello(hungry).toUpperCase());
+}
+
+export awesome;
+```
+
+```js
+// 导入`foo`和`bar`整个模块
+module foo from "foo";
+module bar from "bar";
+
+console.log(bar.hello("rhino"));   // Let me introduce: rhino
+
+foo,awesome();  // LET ME INTRODUCE: HIPPO
+```
+
+**注意**：需要使用前面两个代码片段中的内容分别创建两个分离的文件"foo.js"和"bar.js"。然后，你的程序将加载/导入这些模块来使用它们，就像第三个片段那样。
+
+`import`在当前的作用域中导入一个模块的API的一个或多个成员，每个都绑定一个变量(这个例子中是`hello`)。`module`将整个模块的API导入到一个被绑定的变量(这个例子中是`foo`, `bar`)。`export`为当前模块的公有API导出一个标识符(变量，函数)。在一个模块的定义中，这些操作符可以根据需要使用任意多次。
+
+在模块文件内部的内容被视为像是包围在一个作用域闭包中，就像早先看到的使用函数闭包的模块那样。
