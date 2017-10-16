@@ -336,5 +336,151 @@ var obj = {
 };
 
 var bar = foo.bind(obj);
-var b = bar(3);
+var b = bar(3); // 2 3
+console.log(b); // 5
+```
+
+`bind(..)`返回一个硬编码的新函数，它使用你指定的`this`环境来调用原本的函数。
+
+**注意**:在ES6中,`bind(..)`生成的硬绑定函数有一个名为`.name`的属性，它源自于原始的目标函数(target function)。举例来说：`bar = foo.bind(..)`应该有一个`bar.name`属性，它的值为`"bound foo"`，这个值应当会显示在调用栈轨迹的函数调用名称中。
+
+## API调用的"环境"
+
+确实，许多库中的函数，和许多在JavaScript语言以及宿主环境中的内建函数，都提供一个可选参数，通常称为"环境(context)"，这种设计作为一种替代方案来确保你的回调函数使用特定的`this`而不必非得使用`bind(..)`。
+
+```js
+function foo(el){
+  console.log(el, this.id);
+}
+
+var obj = {
+  id: "awesome"
+};
+
+// 使用`obj`作为`this`来调用`foo(..)`
+[1,2,3].forEach(foo, obj); // 1 awesone   2 awesome  3 awesome
+```
+
+## new 绑定(new Binding)
+
+第四种也是最后一种`this`绑定规则，要求我们重新思考JavaScript 中关于函数和对象的常见误解。
+
+在传统的面向类语言中，"构造器"是附着在类上的一种特殊方法，当使用`new`操作符来初始化一个类时，这个类的构造器就会被调用。通常看起来像这样：
+
+```js
+something = new MyClass(..);
+```
+
+JavaScript 拥有`new`操作符，而且使用它的代码模式看起来和我们在面向类语言中看到的基本一样；大多数开发者猜测JavaScript机制在作某种相似的事情。但是，实际上JavaScript的机制和`new`在JS中的用法所暗示的面向类的功能没有任何联系。
+
+首先，让我们重新定义JavaScript的"构造器"是什么。在JS中，构造器**仅仅是一个函数**,它们偶然地与前置的`new`操作符一起调用。它们不依附于类，它们也不初始化一个类。它们甚至不是一种特殊的函数类型。它们本质上只是一般的函数，在被使用`new`来调用时改变了行为。
+
+例如,引用ES5.1的语言规范`Number(..)`函数作为一个构造器来说：
+
+> 15.7.2 Number构造器
+> 当Number作为new表达式的一部分被调用时，它是一个构造器：它初始化这个新创建的对象。
+
+所以，可以说任何函数，包括像`Number(..)`这样的内建对象函数都可以在前面加上`new`来被调用，这使函数调用成为一个 构造器调用(constructor call)。这是一个重要而微妙的区别：实际上不存在"构造器函数"这样的东西，而只有函数的构造器调用。
+
+当在函数前面被加入`new` 调用时，也就是构造器调用时，下面这些事情会自动完成:
+
+1  一个全新的对象会凭空创建(就是被构建)。
+
+2  这个新构建的对象会被接入原型链([[Prototype]] -linked)。
+
+3  这个新构建的对象被设置为函数调用的`this`绑定。
+
+4  除非函数返回一个它自己的其他**对象**,否则这个被`new`调用的函数将自动返回这个新构建的对象。
+
+步骤1，3和4是我们当下要讨论的。我们现在跳过第二步。
+
+```js
+function foo(a){
+  this.a = a;
+}
+
+var bar = new foo(2);
+console.log(bar.a);  // 2
+```
+
+通过在前面使用`new`来调用`foo(..)`，我们构建了一个新的对象作为`foo(..)`调用的`this`。`new`是函数调用可以绑定`this`的最后一种方式，我们称之为new绑定(new binding)。
+
+## 一切皆有顺序
+
+如此，我们已经揭示了函数调用中的四种`this`绑定规则。你需要做的一切就是找到调用点然后考察哪一种规则适用于它。但是，如果调用点上有多种规则使用呢？这些规则一定有一个优先顺序，我们下面就来展示这些规则以什么样的优先顺序实施。
+
+很显然，默认绑定在四种规则中的优先权最低的。
+
+隐含绑定和明确绑定哪一个更优先呢？我们来测试一下：
+
+```js
+function foo(){
+  console.log(this.a);
+}
+
+var obj1 = {
+  a:2,
+  foo:foo
+};
+
+var obj2 = {
+  a:3,
+  foo:foo
+};
+
+obj1.foo(); // 2
+obj2.foo(); // 3
+
+obj1.foo.call(obj2); // 3
+obj2.foo.call(obj1); // 2
+```
+
+所以，明确绑定的优先权要高于隐含绑定，这意味着你应当在考察隐含绑定之前首先考察明确绑定是否适用。
+
+现在，我们只需要搞清楚new绑定的优先级于何处。
+
+```js
+function foo(something){
+  this.a = something;
+}
+
+var obj1 = {
+  foo:foo
+};
+
+var obj2 = {};
+
+obj1.foo(2);
+console.log(obj1.a); // 2
+
+obj1.foo.call(obj2, 3);
+console.log(obj2.a); // 3
+
+var bar = new obj1.foo(4);
+console.log(obj1.a); // 2
+console.log(bar.a); // 4
+```
+
+好了，new绑定的优先级要高于隐含绑定。
+
+**注意**:`new`和`call/apply`不能同时使用,所有`new foo.call(obj1)`是不允许的，也就是不能直接对比测试new绑定和明确绑定。但是我们依然可以使用硬绑定测试这两个规则的优先级。
+
+在我们进入代码探索之前，回想一下硬绑定物理上是如何工作的，也就是`Function.prototype.bind(..)`创建了一个新的包装函数,这个函数被硬编码为忽略它自己的`this`绑定(不管它是什么)，转而手动使用我们提供的。
+
+因此，这似乎看起来很明显，硬绑定的优先级要比new绑定高，而且不能被`new`覆盖。
+
+```js
+function foo(something){
+  this.a = something;
+}
+
+var obj1 = {};
+var bar = foo.bind(obj1);
+bar(2);
+
+console.log(obj1.a);  // 2
+
+var baz = new bar(3);
+console.log(obj1.a); // 2
+console.log(baz.a);  // 3
 ```
