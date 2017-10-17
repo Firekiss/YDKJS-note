@@ -218,7 +218,7 @@ function setTimeout(fn, delay){
 }
 ```
 
-正如我们刚刚看到的，我们的回调函数丢掉他们的`this`绑定是十分常见的事情。但是`this`使我们吃惊的另一种方式是，接收我们回调的函数故意改变调用的`this`。哪些很流行的JavaScript库中的事件处理器就十分喜欢强制你的回调的`this`指向出发事件的DOM元素。虽然有时这很好用，但其他时候这简直能气死人。不幸的是，这些工具很少给你选择。
+正如我们刚刚看到的，我们的回调函数丢掉他们的`this`绑定是十分常见的事情。但是`this`使我们吃惊的另一种方式是，接收我们回调的函数故意改变调用的`this`。那些很流行的JavaScript库中的事件处理器就十分喜欢强制你的回调的`this`指向触发事件的DOM元素。虽然有时这很好用，但其他时候这简直能气死人。不幸的是，这些工具很少给你选择。
 
 不管哪一种意外改变`this`的方式，你都不能真正地控制你的回到函数引用将如何被执行，所以没有办法控制调用点给你一个故意的绑定。
 
@@ -226,7 +226,7 @@ function setTimeout(fn, delay){
 
 用我们刚看到的隐含绑定，我们不得不改变目标对象使它自身包含一个对函数的引用，而后使用这个函数引用属性来间接地(隐含地)将`this`绑定到这个对象上。
 
-但是，如果你想强制一个函数调用使某个特定对象作为`this`绑定，而不在这个对象上防止一个函数引用属性呢？
+但是，如果你想强制一个函数调用使某个特定对象作为`this`绑定，而不在这个对象上放置一个函数引用属性呢？
 
 JavaScript语言中的"所有"函数都有一些工具(通过他们的`[[Prototype]]`)可以用于这个任务。具体地的说，函数拥有`call(..)`和`apply(..)`方法。从技术上讲，JavaScript宿主环境有时会提供一些(说的好听点儿)很特别的函数，它们没有这些功能。但这很少见。绝大多数被提供的函数，当然你还将创建的所有的函数，都可以访问`call(..)`和`apply(..)`。
 
@@ -483,4 +483,81 @@ console.log(obj1.a);  // 2
 var baz = new bar(3);
 console.log(obj1.a); // 2
 console.log(baz.a);  // 3
+```
+
+`bar`是硬绑定到`obj1`的，但是`new bar(3)`并**没有**像我们期待的那样将`obj1.a`变为`3`。反而，应绑定(到obj1)的`bar(..)`调用可以被`new`所覆盖。因为`new`被实施，我们得到一个名为`baz`的新创建的对象，而且我们确实看到`baz.a`的值为`3`。
+
+如果你回头看看我们的山寨绑定帮助函数，这很令人吃惊：
+
+```js
+function bind(fn, obj){
+  return function(){
+    fn.apply(obj, arguments);
+  }
+}
+```
+
+如果你推导这段帮助代码如何工作，会发现对于`new`操作符调用来说没有办法像我们观察到的那样，将绑定到的`obj`的硬绑定覆盖。
+
+但是ES5内建`Function.prototype.bind(..)`更加精妙，实际上十分精妙。这里是MDN网页上为`bind(..)`提供的(稍稍格式化后的)polyfill：
+
+```js
+if(!Function.prototype.bind){
+  Function.prototype.bind = function(oThis){
+    if(typeof this !== "function"){
+      // 可能与ECMAScript 5 内部的 IsCallable 函数最接近的东西
+      throw new TypeError("Function.prototype.bind - what " +
+      "is trying to be bound is not callable");
+    }
+
+    var aArgs = Array.prototype.slice.call(arguments, 1),
+        fToBind = this,
+        fNOP = function(){},
+        fBound = function(){
+          return fToBind.apply(
+                        (this instanceof fNOP &&
+                         oThis ? this : oThis
+                        ),
+                        aArgs.concat(Array.prototype.slice.call(arguments))
+          );
+        };
+
+    fNOP.prototype = this.prototype;
+    fBound.prototype = new fNOP();
+
+    return fBound;
+  }
+};
+```
+
+**注意**：就将与`new`一起使用的硬绑定函数(参照下面来看为什么这有用)而言，上面的`bind(..)`polyfill与ES5中内建的`bind(..)`是不同的。因为polyfill不能像内建工具那样，没有`.prototype`就能创建函数，这里使用了一些微妙而间接的方法来近似模拟相同的行为。如果你打算将硬绑定函数和`new`一起使用而且依赖于这个polyfill，应当多加小心。
+
+允许`new`进行覆盖的部分是这里:
+
+```js
+this instanceof fNOP &&
+oThis ? this : oThis
+
+fNOP.prototype = this.prototype;
+fBound.prototype = new fNOP();
+```
+
+我们不会实际深入解释这个花招是如何工作的(这很复杂而且超出了我们当前讨论范围)，但实质上这个工具判断硬绑定函数是否通过`new`被调用的(导致一个新构建的对象作为它的`this`)，如果是，它就用哪个新构建的`this`而非先前为`this`指定的硬绑定。
+
+为什么`new`可以覆盖 硬绑定这件事很有用？
+
+这种行为的主要原因是，创建一个实质上忽略`this`的硬绑定而预先设置一部分或所有的参数的函数(这个函数可以与`new`一起使用来构建对象)。`bind(..)`的一个能力是，任何在第一个`this`绑定参数之后被传入的参数，默认地作为当前函数的标准参数(技术上这称为"局部应用"，是一种柯里化)。
+
+```js
+function foo(p1, p2){
+  this.val = p1 + p2;
+}
+
+// 在这里使用`null`是因为在这种场景下我们不关心`this`的硬绑定
+// 而且反正它将会被 `new` 调用覆盖掉！
+
+var bar = foo.bind(null, "p1");
+var baz = new bar("p2");
+
+baz.val; // p1p2
 ```
