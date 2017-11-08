@@ -623,4 +623,189 @@ bar(3); // a:2, b:3
 
 这两种工具都要求第一个参数是`this`绑定。如果目标函数不关心`this`，你就需要一个占位值，而且正如这个代码段中展示的，`null`看起来是一个合理的选择。
 
-**注意**：虽然我们在这本书中没有涵盖，但是ES6中有一个扩散操作符: `...`, 它让看无需使用`apply(..)`而在语法上将一个数组"散开"作为参数，
+**注意**：虽然我们在这本书中没有涵盖，但是ES6中有一个扩散操作符: `...`, 它让看无需使用`apply(..)`而在语法上将一个数组"散开"作为参数，比如`foo(...[1,2])`表示`foo(1,2)` --- 如果`this`绑定没有必要，可以在语法上回避它。不幸的是柯里化在ES6中没有语法上的替代品，所以`bind(..)`调用的`this`参数依然需要注意。
+
+可是，在你不关心`this`绑定而一直使用`null`的时候，有些潜在的"危险"。如果你这样处理一些函数调用(比如，不归你管控的第三方包)，而且那些函数确实使用了`this`引用，那么默认绑定规则意味着它可能会不经意间引用(或者改变)`global`对象(在浏览器中是`window`)。
+
+很显然，这样的陷阱会导致多种非常难诊断和追踪的bug。
+
+## 更安全地`this`
+
+也许某些"更安全"的做法是：为了`this`而传递一个特殊创建好的对象，这个对象保证不会对你的程序产生副作用。从网络学或军事上借用一个词，我们可以建立一个"DMZ"(非军事区)对象 --- 只不过是一个完全为空， 没有委托的对象。
+
+如果我们为了忽略自己认为不用关心的`this`绑定，而总是传递一个DMZ对象，那么我们就可以确定任何对`this`的隐藏或意外的使用将会被限制在这个对象中，也就是说这个对象将`global`对象和副作用隔离开来。
+
+因为这个对象是完全空的，我个人喜欢给它一个变量名为`ø`(空集合的数学符号的小写)。如果你不喜欢`ø`符号，或者你的键盘没那么好打，你当然可以叫它任意你希望的名字。
+
+无论你叫它什么，创建**完全为空额对象**的最简单方法就是 `Object.create(null)`。这个方法和`{}`很相似，但是没有指向`Object.prototype`的委托，所以它比`{}`"空得更彻底"。
+
+```js
+function foo(a, b){
+  console.log("a:" + a + ",b:" + b);
+}
+
+// 我们的 DMZ 空对象
+var ø = Object.create(null);
+
+// 将数组散开作为参数
+foo.apply(ø, [2,3]); // a:2, b:3
+
+// 用`bind(..)`进行 currying
+var bar = foo.bind(ø, 2);
+bar(3); // a:2, b:3
+```
+
+不仅在功能上更"安全"，`ø`还会在代码风格上产生些好处，它在语义上可能会比`null`更清晰的表达"我想让`this`为空"。当然，你可以随自己喜欢来称呼你的DMZ对象。
+
+## 间接
+
+另一个要注意的是，你可以(有意无意地！)创建对函数的"间接引用"，在那样的情况下，当那个函数引用被调用时，默认绑定规则也会适用。
+
+一个最常见的间接引用产生方式是通过赋值:
+
+```js
+function foo(){
+  console.log(this.a);
+}
+
+var a = 2;
+var o = {a:3, foo:foo};
+var p = {a:4};
+
+o.foo(); // 3
+(p.foo = o.foo)(); // 2
+```
+
+赋值表达式`p.foo = o.foo`的结果值是一个刚好指向底层函数对象的引用。如此，起作用的调用点就是`foo()`，而非你期待的`p.foo()`或`o.foo()`。根据上面的规则，默认绑定适用。
+
+提醒：无论你如何得到适用默认绑定的函数调用，被调用函数的**内容**的`strict mode`状态 --- 而非函数的调用点 --- 决定了 `this`引用的值： 不是`global`对象(在非`strict mode`下)，就是`undefined`(在`strict mode`下)。
+
+## 软化绑定(Softening Binding)
+
+我们之前看到的硬绑定是一种通过将函数强制绑定到特定的`this`上，来防止函数调用在不经意间回退到默认绑定的策略(除非你用`new`去覆盖它!)。问题是，硬绑定极大地降低了函数的灵活性，阻止我们手动使用隐含绑定或后续的明确绑定来覆盖`this`。
+
+如果有这样的办法就好了:为默认绑定提供不同的默认值(不是`global`或`undefined`)，同时保持函数可以通过隐含绑定或明确绑定技术来手动绑定`this`。
+
+```js
+
+if(!Function.prototype.softBind){
+  Function.prototype.softBind = function(obj){
+    var fn = this, // 调用函数
+        curried = [].slice.call(arguments, 1), // 调用参数
+        bound = function bound(){
+          return fn.apply(
+            (!this ||
+                      (typeof window !== 'undefined' &&
+                              this === window) ||
+                      (typeof global !== 'undefined' &&
+                              this === global)
+            ) ? obj : this,
+            curred.concat.apply(curried, arguments)
+          );
+        };
+    bound.prototype = Object.create(fn.prototype);
+    return bound;
+  };
+}
+
+```
+
+这里提供的`softBind(..)`工具的工作方式和ES5内建的`bind(..)`工具很相似，除了我们的软绑定行为。它用一种逻辑将指定的函数包装起来，这个逻辑在函数调用时检查`this`，如果它是`global`或`undefined`，就使用预先指定的默认值`object`，否则保持`this`不变。它也提供了可选的柯里化行为。
+
+我们来看看它的用法：
+
+```js
+function foo(){
+  console.log("name: " + this.name);
+}
+
+var obj = {name: "obj"},
+    obj2 = {name: "obj2"},
+    obj3 = {name: "obj3"};
+
+var fooOBJ = foo.softBind(obj);
+
+fooOBJ();  // name: obj
+
+obj2.foo = foo.softBind(obj);
+obj2.foo(); // name: obj2
+
+fooOBJ.call(obj3); // name: obj3
+
+setTimeout(obj2.foo, 10); // name:obj  <-- 退回到软绑定
+
+```
+
+软绑定版本的`foo()`函数可以如展示的那样被手动`this`绑定到`obj2`或`obj3`，如果默认绑定使用时会退到`obj`。
+
+## 词法`this`
+
+我们刚刚涵盖了一般函数遵循的四种规则。但是ES6引入了一种不适用于这些规则的特殊的函数： 箭头函数。
+
+箭头函数不是通过`function`关键字声明的，而是通过所谓的"大箭头"操作符: `=>`。 与使用四种标准的`this`规则不同的是，箭头函数从封闭它的(函数或全局)作用域采用`this`绑定。
+
+```js
+function foo(){
+  // 返回一个箭头函数
+  return (a) => {
+    // 这里的`this`是词法上从`foo()`采用的
+    console.log(this.a);
+  }
+}
+
+var obj1 = {
+  a: 2
+};
+
+var obj2 = {
+  a: 3
+}
+
+var bar = foo.call(obj1);
+bar.call(obj2); // 2, 不是3！
+```
+
+在`foo()`中创建的箭头函数在词法上捕获`foo()`被调用时的`this`，不管它是什么。因为`foo()`被`this`绑定到`obj1`, `bar`(被返回的箭头函数的一个引用)也将被`this`绑定到`obj1`。一个箭头函数的词法绑定是不能被覆盖的(就连`new`也不行!)。
+
+最常见的用法就是用于回调
+
+```js
+
+function foo(){
+  setTimeout(() => {
+    // 这里的`this`是词法上从`foo`采用
+    console.log(this.a);
+  }, 100);
+}
+
+var obj = {
+  a: 2
+};
+foo.call(obj); // 2
+```
+
+虽然箭头函数提供了使用`bind(..)`外，另外一种在函数上确保`this`的方式，这看起来很吸引人，但是重要的是要注意它们本质是使用广为人知的词法作用域来禁止了传统的`this`机制，在ES6之前，为此我们已经有了相当常用的模式，这些模式几乎和ES6的箭头函数的精神没有区别:
+
+```js
+function foo(){
+  var self = this; // 词法上捕获`this`
+  setTimeout(function(){
+    console.log(self.a);
+  }, 100);
+}
+
+var obj = {
+  a:2
+};
+
+foo.call(obj); // 2
+```
+
+虽然对不想要`bind(..)`的人来说`self = this`和箭头函数都是看起来不错的"解决方案",但它们实质上逃避了`this`而非理解和接收它。
+
+如果你发现你在写`this`风格的代码，但是大多数或全部时候，你都用词法上的`self = this`或箭头函数"技巧"抵御`this`机制，那么也许你应该:
+
+1. 仅使用词法作用域并忘掉虚伪的`this`代码风格。
+2. 完全接受`this`风格机制，包括在必要的时候使用`bind(..)`,并尝试避开`self = this`和箭头函数的"词法this"技巧。
+
+一个程序可以有效地同时利用两种风格的代码，但是在同一个函数内部，特别是对同种类型的查找，混合这两中机制通常是自找很难维护的代码。
