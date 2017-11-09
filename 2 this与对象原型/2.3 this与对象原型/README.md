@@ -230,4 +230,90 @@ myObject.foo; // function foo(){..}
 var myArray = ["foo", 42, "bar"];
 
 myArray.length; // 3
+myArray[0]; // "foo"
+myArray[2]; // "bar"
 ```
+
+数组也是对象，所以虽然每个索引都是正整数，你还可以在数组上添加属性：
+
+```js
+var myArray = ["foo", 42, "bar"];
+
+myArray.baz = "baz";
+myArray.length; // 3
+myArray.baz; // "baz"
+```
+
+**注意**: 添加命名属性(不论是使用`.`还是`[]`操作符语法)不会改变数组的`length`所报告的值。
+
+你可以把一个数组当做普通的键/值对象使用，并且从不添加任何数字下标，但这不是一个好主意，因为数组对它本来的用途有着特定的行为和优化方式，普通对象也一样。使用对象来存储键/值对，而用数组在数字下标上存储值。
+
+**小心**: 如果你试图在一个数组上添加属性，但是属性名看起来像一个数字，那么最终它会成为一个数字索引(也就是改变了数组的内容)：
+
+```js
+var myArray = ["foo", 42, "bar"];
+
+myArray["3"] = "baz";
+myArray.length; // 4
+myArray[3]; // "baz"
+```
+
+## 复制对象
+
+当开发者们初次拿起JavaScript语言时，最常需要的特性就是如何复制一个对象。看起来应该有一个内建的`copy()`方法，但是事情实际上比这复杂一些，因为在默认的请款下，复制的算法应当是什么，并不十分明确。
+
+```js
+function anotherFunction(){/**/}
+
+var anotherObject = {
+  c: true
+};
+
+var anotherArray = [];
+
+var myObject = {
+  a:2,
+  b:anotherObject, // 引用，不是拷贝！
+  c:anotherArray,  // 又一个引用！
+  d:anotherFunction
+};
+
+anotherArray.push(anotherObject, myObject);
+```
+
+一个`myObject`的拷贝究竟应该怎么表现？
+
+首先，我们应该回答它是一个浅(shallow)还是一个深(deep)拷贝？一个浅拷贝会得到一个新对象，它的`a`是值`2`的拷贝，但`b`，`c`和`d`属性仅仅是引用，它们指向被拷贝对象引用的相同位置。一个深拷贝将不仅复制`myObject`,还会复制`anotherObject`和`anotherArray`。但之后我们让`anotherArray`拥有`anotherObject`和`myObject`的引用，所以那些也应当被复制而不是保留引用。现在由于循环引用，我们得到了一个无限循环复制的问题。
+
+我们应当检测循环引用并打破循环遍历吗(不管位于深处的，没有完全复制的元素)？我们应当报错退出吗？或者介于两者之间？
+
+另外，"复制"一个函数意味着什么,也不是很清楚。有一些技巧，比如提取一个函数源代码的`toString()`序列化表达(这个源代码因实现不同而不同，而且根据被考察的函数的类型，其结果甚至在所有引擎上都不可靠)。
+
+那么我们如何解决这些刁钻的问题？不同的JS框架都各自挑选自己的解释并且做出自己的选择。但是哪一种(如果有的话)才是JS应当作为标准采用的呢？
+
+一个解决方案是，JSON安全的对象(也就是，可以被序列化为一个JSON字符串，之后还可以被重新解析为拥有相同的结构的值的对象)可以简单地这样复制:
+
+```js
+var newObj = JSON.parse(JSON.stringify(someObj));
+```
+
+当然，这要求你保证你的对象是JSON安全地。对于某些情况，这没有什么大不了的。而对另一些情况，这还不够。
+
+同时，浅拷贝相当易懂，而且没有那么多问题，所以ES6为此任务已经定义了`Object.assign()`。`Object.assign(..)`接收目标作为第一个参数，然后是一个或多个源对象作为后续参数。它会在源对象上迭代所有的可枚举，owned keys(直接拥有的键),并把它们拷贝到目标对象上(仅通过 `=` 赋值)。它还会很方便地返回目标对象，正如下面你可以看到的:
+
+```js
+var newObj = Object.assign({}, myObject);
+
+newObj.a; // 2
+newObj.b === anotherObject; // true
+newObj.c === anotherArray; // true
+newObj.d === anotherFunction; // true
+```
+
+**注意**: 在下一部中，我们将讨论"属性描述符"并展示`Object.defineProperty(..)`的使用，然而在`Object.assign(..)`中发生的复制是单纯的`=`式赋值，所以任何在源对象属性的特殊性质(比如`writable`)在目标对象上**都不会保留**
+
+## 属性描述符(Property Descriptors)
+
+在ES5之前，JavaScript语言没有给出直接的方法，让你的代码可以考察或描述属性性质间的区别，比如属性是否为只读。
+
+在ES5中，所有的属性都用**属性描述符**来描述。
