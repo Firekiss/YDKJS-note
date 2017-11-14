@@ -317,3 +317,319 @@ newObj.d === anotherFunction; // true
 在ES5之前，JavaScript语言没有给出直接的方法，让你的代码可以考察或描述属性性质间的区别，比如属性是否为只读。
 
 在ES5中，所有的属性都用**属性描述符**来描述。
+
+```js
+var myObject = {
+  a: 2
+};
+
+Object.getOwnPropertyDescriptor(myObject, "a");
+
+// {
+//  value: 2,
+//  writable: true,
+//  enumerable: true,
+//  configurable: true
+// }
+```
+
+正如你所见，我们普通的对象属性`a`的属性描述符(称为"数据描述符", 因为它仅有一个数据值)的内容要比`value`为`2`多得多。它还包括另外三个性质：`writable`,`enumerable`,`configurable`。
+
+当我们创建一个普通属性时，可以看到属性描述符的各种性质的默认值，同时我们可以用`Object.defineProperty(..)`来添加新属性，或使用期望的性质来修改既存在的属性(如果它是`configurable`的！)。
+
+```js
+var myObject = {};
+
+Object.defineProperty(myObject, "a", {
+  value: 2,
+  writable: true,
+  configurable: true,
+  enumerable: true
+});
+
+myObject.a; // 2
+```
+
+使用`defineProperty(..)`,我们手动、明确地在`myObject`上添加一个直白的，普通的`a`属性。然而，你通常不会使用这种手动方法，除非你想要把描述的某个性质修改为不同的值。
+
+## 可写性(Writable)
+
+`writable`控制着你改变属性值的能力。
+
+```js
+var myObject = {};
+
+Object.defineProperty(myObject, "a", {
+  value: 2,
+  writable: false, // 不可写!
+  configurable: true,
+  enumerable: true
+});
+
+myObject.a = 3;
+myObject.a; // 2
+```
+
+如你所见，我们对`value`的修改悄无声息地失败了。如果我们在`strict mode`下进行尝试，会得到一个错误:
+
+```js
+"use strict";
+
+var myObject = {};
+
+Object.defineProperty(myObject, "a", {
+  value: 2,
+  writable: false, //不可写!
+  configurable: true,
+  enumerable: true
+});
+
+myObject.a = 3; // TypeError
+```
+
+这个`TypeError`告诉我们，我们不能改变一个不可写属性。
+
+**注意**：我们一会就会讨论getters/setters，但是简单地说，你可以观察到`writable:false`意味着值不可以改变，和你定义一个空的setter是有些等价的。实际上，你的空setter在被调用时需要扔出一个`TypeError`,来和`writable:false`保持一致。
+
+## 可配置性(Configurable)
+
+只要属性当前是可配置的，我们就可以使用相同的`defineProperty(..)`工具，修改它的描述符定义。
+
+```js
+var myObject = {
+  a: 2
+};
+
+myObject.a = 3;
+myObject.a; // 3
+
+Object.defineProperty(myObject, "a", {
+  value: 4,
+  writable: true,
+  configurable: false, // 不可配置!
+  enumerable: true
+});
+
+myObject.a; // 4
+myObject.a = 5;
+myObject.a; // 5
+
+Object.defineProperty(myObject, "a", {
+  value: 6,
+  writable: true,
+  configurable: true,
+  enumerable: true
+}); // TypeError
+```
+
+最后的`defineProperty(..)`调用导致了一个TypeError,这与`strict mode`无关，如果你试图改变一个不可配置属性的描述符定义，就会发生TypeError。 要小心: 如你所看到的，将`configurable`设置为`false`是**一个单向操作，不可撤销**！
+
+**注意**：这里有一个需要注意的微小例外:即便属性已经是`configurable: false`,`writable`总是可以没有错误地从`true`改为`false`，但是如果已经是`false`的话不能变回`true`。
+
+`configurable:false`阻止的另外一个事情是使用`delete`操作符移除既存属性的能力。
+
+```js
+var myObject = {
+  a: 2
+};
+
+myObject.a; // 2
+delete myObject.a;
+myObject.a; // undefined
+
+Object.defineProperty(myObject, "a", {
+  value: 2,
+  writable: true,
+  configurable: false,
+  enumerable: true
+});
+
+myObject.a; // 2
+delete myObejct.a;
+myObject.a; // 2
+```
+
+如你所见，最后的`delete`调用(无声地)失败了，因为我们将`a`属性设置成了不可配置。
+
+`delete`仅用于直接从目标对象移除该对象的(可以被移除的)属性。如果一个对象的属性是某个其他对象/函数的最后一个现存的引用。而你`delete`了它，那么这就移除了这个引用，于是现在那个没有被任何地方所引用的对象/函数就可以被作为垃圾回收。但是，将`delete`当做一个像其他语言(如C/C++)中那样的释放内存工具是不恰当的。`delete`仅仅是一个对象属性移除操作 --- 没有更多别的含义。
+
+## 可枚举性(Enumerable)
+
+我们将要在这里提到的最后一个描述符性质是`enumerable`(还有另外两个，我们将在一会儿讨论getter/setter时讨论到)。
+
+它的名称可能已经使它的功能很明显了，这个性质控制着一个属性能否在特定的对象-属性枚举操作中出现，比如`for..in`循环。设置为`false`将会阻止它出现在这样的枚举中，即使它依然完全是可以访问的。设置为`true`会使它出现。
+
+所有普通的用户定义属性都是默认是可`enumerable`的，正如你通常希望的那样。如果你有一个特殊的属性，你想让它对枚举隐藏，就将它设置为`enumerable:false`。
+
+我们一会就会更加详细地样式可枚举性，所以在大脑中给这个话题打上一个书签。
+
+## 不可变性(Immutability)
+
+有时我们希望将属性或对象(有意或无意地)设置为不可改变的。ES5用几种不同的微妙方式，加入了对此功能的支持。
+
+一个重要的注意点是：**所有**这些方法创建的都是浅不可变性。也就是，他们仅仅影响对象和它的直属属性。如果对象拥有对其他对象(数组、对象、函数等)的引用，那个对象的内容不会受影响，任然保持可变。
+
+```js
+myImmutableObject.foo; // [1,2,3]
+myImmutableObject.foo.push(4);
+myImmutableObject.foo; // [1,2,3,4]
+```
+
+在这段代码中，我们假设`myImmutableObject`已经被创建，而且被保护为不可变。但是，为了保护`myImmutableObject.foo`的内容(也是一个对象 -- 数组)，你将需要使用下面的一个或多个方法将`foo`设置为不可变。
+
+**注意**:在JS程序中创建完全不可动摇的对象是不那么常见的。有些特殊的情况当然需要，但是作为一个普通的设计模式，如果发现自己想要封印(seal)或冻结(freeze)你所有的对象，那么你可能想要退一步来重新考虑你的程序设计，让它对对象值的潜在变化更加健壮。
+
+## 对象常量(Object Constant)
+
+通过将`writable:false`与`configurable:false`组合，你可以实质上创建了一个作为对象属性的常量(不能被改变，重定义或删除)，比如：
+
+```js
+var myObject = {};
+
+Object.defineProperty(myObject, "FAVORITE_NUMBER", {
+  value: 42,
+  writable: false,
+  configurable: false
+});
+```
+
+## 阻止扩展(Prevent Extensions)
+
+如果你想防止一个对象被添加新的属性，但另一方面保留其他既存的对象属性,可以调用`Object.preventExtensions(..)`:
+
+```js
+var myObject = {
+  a: 2
+};
+
+Object.preventExtensions(myObject);
+
+myObject.b = 3;
+myObject.b; // undefined
+```
+
+在非`strict mode`模式下，`b`的创建会无声地失败。在`strict mode`下，它会抛出`TypeError`。
+
+## 封印(Seal)
+
+`Object.seal(..)`创建一个"封印"的对象，这意味着它实质上在当前的对象上调用`Object.preventExtensions(..)`，同时也将它所有的既存属性标记为`configurable:false`。
+
+所以，你既不能添加更多的属性，也不能重新配置或删除既存属性(虽然你依然可以修改它们的值)。
+
+## 冻结(Freeze)
+
+`Object.freeze(..)`创建一个冻结的对象，这意味着它实质上在当前的对象上调用`Object.seal(..)`,同时也将它所有的"数据访问"属性设置为`writable:false`，所以它们的值不可改变。
+
+这种方法是你可以从对象自身获得的最高级别的不可变性，因为它阻止了任何对对象或对象直属属性的改变(虽然，就像上面提到的，任何被引用的对象的内容不受影响)。
+
+你可以"深度冻结"一个对象: 在这个对象上调用`Object.freeze(..)`,然后递归地迭代所有它引用的(目前还没有受到影响的)对象，然后也在它们上面调用`Object.freeze(..)`。但是要小心，这可能会影响其他你并不打算影响的(共享的)对象。
+
+## `[[Get]]`
+
+关于属性访问如何工作有一个重要的细节。
+
+考虑下面的代码:
+
+```js
+var myObject = {
+  a: 2
+};
+
+myObject.a; // 2
+```
+
+`myObject.a`是一个属性访问，但是它并不是看起来那样，仅仅在`myObject`中寻找一个名为`a`的属性。
+
+更具语言规范，上面的代码实际上在`myObject`上执行了一个`[[GET]]`操作(有些像`[[GET]]()`函数调用)。对一个对象进行默认的内建`[[Get]]`操作，会首先检查对象，寻找一个拥有被请求的名称的属性，如果找到，就返回相应的值。
+
+然而，如果按照被请求的名称没有找到属性，`[[Get]]`的算法定义了另一个重要的行为。我们会在第五章来解释接下来会发生什么(遍历[[Prototype]]链，如果有的话)。
+
+但`[[Get]]`操作的一个重要的结果是，如果它通过任何方法都找不到被请求的属性的值，那么它会返回`undefined`。
+
+```js
+var myObject = {
+  a: 2
+};
+
+myObject.b; //undefined
+```
+
+这个行为和你通过标识符名称来引用变量不同。如果你引用了一个在可用的词法作用域内无法解析的变量，其结果不是像对象属性那样返回`undefined`，而是抛出一个`ReferenceError`。
+
+```js
+var myObject = {
+  a: undefined
+};
+
+myObject.a; //undefined
+myObject.b; //undefiend
+```
+
+从值的角度来说，这两个引用没哟区别 --- 他们的结果都是`undefined`。然而，在`[[Get]]`操作的底层，虽然不明显，但是比起处理引用`myObject.a`,处理`myObject.b`的操作要多做一些潜在的"工作"。
+
+如果仅仅考察结果的值，你无法分辨一个属性是存在并持有一个`undefined`值，还是因为属性根本不存在所以`[[Get]]`无法返回某个具有值而返回默认的`undefined`。但是，你很快就能看到你其实可以分辨这两种场景。
+
+## `[[Put]]`
+
+既然为了从一个属性中取得值而存在一个内部定义的`[[Get]]`操作，那么很明显应该也存在一个默认的`[[Put]]`操作。
+
+这很容易让人认为，给一个对象的属性赋值，将会在这个对象上调用`[[Put]]`来设置或创建这个属性。但是实际情况却有一些微妙的不同。
+
+调用`[[Put]]`时，它根据几个因素表现不同的行为，包括(影响最大的)属性是否已经在对象中存在了。
+
+如果属性存在，`[[Put]]`算法将会大致检查:
+
+1. 这个属性是访问器描述吗?**如果是，而且是setter,就调用setter**。
+2. 这个属性是`writable`为`false`数据描述符吗？**如果是，在非`strict mode`下无声地失败，或者在`strict mode`下抛出`TypeError`**。
+3. 否则，像平常一样设置既存属性的值。
+
+如果属性在当前对象中还不存在，`[[Put]]`操作会变得更微妙和复杂。
+
+## Getters 与 Setters
+
+对象默认的`[[Put]]`和`[[Get]]`操作分别完全控制着如何设置既存货新属性的值，如何获取得既存属性。
+
+**注意**：使用较先进的语言特性，覆盖整个对象(不仅是每个属性)的默认`[[Put]]`和`[[Get]]`操作是可能的。
+
+ES5引入了一个方法来覆盖这些默认操作的一部分，但不是在对象级别而是针对每个属性，就是通过getters和setters。Getter是实际上调用一个隐藏函数来取得值的属性。Setter是实际上调用一个隐藏函数来设置值的属性。
+
+当你将一个属性定义为拥有getter或setter或两者兼备，那么它的定义就成为了"访问器描述符"(与"数据描述符"相对)。对于访问器描述符，它的`value`和`writable`性质没有意义而被忽略，取而代之的是JS将会考虑属性的`set`和`get`性质(还有`configurable`和`enumerable`)。
+
+考虑下面代码:
+
+```js
+var myObject = {
+  // 为`a`定义一个getter
+  get a(){
+    return 2;
+  }
+};
+
+Object.defineProperty(
+  myObject, // 目标对象
+  "b",      // 属性名
+  {         // 描述符
+    get: function(){return this.a * 2}, // 为`b`定义getter
+    enumerable: true // 确保对象属性出现
+  }
+);
+
+myObject.a; // 2
+myObject.b; // 4
+```
+
+不管是通过在字面语法中使用`get a(){..}`, 还是通过使用`defineProperty(..)`明确定义，我们都在对象上创建了一个没有实际持有值的属性，访问它们将会自动地对getter函数进行隐藏的函数调用，其返回的任何值就是属性访问的结果。
+
+```js
+var myObject = {
+  // 为`a`定义 getter
+  get a(){
+    return 2;
+  }
+};
+
+myObject.a = 3;
+myObject.a; // 2
+```
+
+因为我们仅为`a`定义了一个getter,如果之后我们试着设置`a`的值，赋值操作并不会抛出错误而是而是无声地将赋值废弃。就算这里有一个合法的setter，我们的定义setter,我们的自定义getter将返回值硬编码为仅返回`2`,所以赋值操作是没有意义的。
