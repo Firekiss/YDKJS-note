@@ -633,3 +633,175 @@ myObject.a; // 2
 ```
 
 因为我们仅为`a`定义了一个getter,如果之后我们试着设置`a`的值，赋值操作并不会抛出错误而是而是无声地将赋值废弃。就算这里有一个合法的setter，我们的定义setter,我们的自定义getter将返回值硬编码为仅返回`2`,所以赋值操作是没有意义的。
+
+为了使这个场景更合理，正如你可能期望的那样，每个属性还应当被定义一个覆盖默认`[[Put]]`操作(也就是赋值)的setter。几乎可以确定，你将总是想要同时声明getter和setter(仅有它们中的一个经常会导致意外的行为):
+
+```js
+var myObject = {
+  // 为`a`定义 getter
+  get a(){
+    return this._a_;
+  },
+  // 为`a`定义 setter
+  set a(val){
+    this._a_ = val * 2;
+  }
+};
+
+myObject.a = 2;
+myObject.a; // 4
+```
+
+**注意**：在这个例子中，我们实际上将赋值操作([[Put]]操作)指定的值`2`存储到另一个变量`_a_`中。`_a_`这个名称只是在这个例子中单纯惯例，并不意味着它的行为有什么特别之处 --- 它和其他普通属性没有区别。
+
+## 存在性(Existence)
+
+我们早先看到，像`myObject.a`这样的属性访问可能会得到一个`undefined`值，无论是它明确存储着`undefined`还是属性`a`根本就不存在。那么，如果这两种情况的值相同，我们还怎么区别它们呢？
+
+我们可以查询一个对象是否拥有特定的属性，而不必取得那个属性的值：
+
+```js
+var myObject = {
+  a: 2
+};
+
+("a" in myObject); // true
+("b" in myObject); // false
+
+myObject.hasOwnProperty("a"); // true
+myObject.hasOwnProperty("b"); // false
+```
+
+`in`操作符会检查属性是否存在于对象中，或者是否存在于`[[Prototype]]`链对象遍历的更高层中。相比之下,`hasOwnProperty(..)`仅仅检查`myObject`是否拥有属性，但不会查询`[[Prototype]]`链。
+
+通过委托到`Object.prototype`，所有的普通对象都可以访问`hasOwnProperty(..)`。但是创建一个不链接到`Object.prototype`的对象也是可能的。
+
+在这种场景下，一个进行这种检查的更健壮的方式是`Object.prototype.hasOwnProperty.call(myObject, "a")`,它借用基本的`hasOwnProperty(..)`方法而且使用明确的`this`绑定来对我们的`myObject`实施这个方法。
+
+**注意**： `in`操作符看起来像是要检查一个值在容器中的存在性，但是它实际上检查的是属性名的存在性。在使用数组时注意这个区别十分重要，因为我们会很强的冲动来进行`4 in [2,4,6]`这样的检查，但是这总是不像我们想象的那样工作。
+
+
+## 枚举(Enumeration)
+
+先前，在学习`enumerable`属性描述符性质时，我们简单地解释了"可枚举性"的含义。
+
+```js
+var myObject = {};
+
+Object.defineProperty(
+  myObject,
+  "a",
+  // 使`a`可枚举，如一般情况
+  {enumerable: true, value:2}
+);
+
+object.defineProperty(
+  myObject,
+  "b",
+  // 使`b`不可枚举
+  {enumerable:false, value:3}
+);
+
+myObject.b; // 3
+("b" in myObject); // true
+myObject.hasOwnProperty("b"); // true
+
+for(var k in myObject){
+  console.log(k, myObject[k]);
+}
+// "a" 2
+```
+
+你会注意到,`myObject.b`实际上**存在**，而且拥有可以访问的值，但是它不出现在`for..in`循环中(然而令人诧异的是，它的`in`操作符的存在性检查通过了)。这是因为"enumerable"基本上意味着"如果对象属性被迭代时会被包含在内"。
+
+**注意**：将`for..in`循环实施在数组上可能会给出意外的结果，因为枚举一个数组将不仅包含所有的数字下标，还包含所有的可枚举属性。所以一个好主意是:将`for..in`循环仅用于对象，而为存储在数组中的值使用传统的`for`循环并用数字索引迭代。
+
+另一个可以区分可枚举和不可枚举属性的方法是：
+
+```js
+var myObject = {};
+
+Object.defineProperty(
+  myObject,
+  "a",
+  // 使`a`可枚举，如一般情况
+  {enumerable: true, value:2}
+);
+
+Object.defineProperty(
+  myObject,
+  "b",
+  // 使`b`不可枚举
+  {enumerable:false, value:3}
+);
+
+myObject.propertyIsEnumerable("a"); // true
+myObject.propertyIsEnumerable("b"); // false
+
+Object.keys(myObject); // ["a"]
+Object.getOwnPropertyNames(myObject); // ["a", "b"]
+```
+
+`propertyIsEnumerable(..)`测试一个给定的属性名是否直接存在于对象上，并且是`enumerable:true`。
+
+`Object.keys(..)`返回一个所有可枚举属性的数组，而`Object.getOwnPropertyNames(..)`返回一个所有属性的数组，不论能不能枚举。
+
+`in`和`hasOwnProperty(..)`区别与它们是否查询`[[Prototype]]`链，而`Object.keys(..)`和`Object.getOwnPropertyNames(..)`都只考察直接给定的对象。
+
+(当下)没有与`in`操作符的查询方式(在整个`[[Prototype]]`链上遍历所有的属性)等价的、内建的方法可以得到一个**所有属性**的列表。你可以近似地模拟一个这样的工具：递归地遍历一个对象的`[[Prototype]]`链。在每一层都从`Object.keys(..)`中获取一个列表 --- 仅包含可枚举属性。
+
+## 迭代(Iteration)
+
+`for..in`循环迭代一个对象上(包括它的`[[Prototype]]`链)所有的可迭代属性。但如果你想迭代值呢？
+
+在数字索引的数组中，典型的迭代所有的值的办法是使用标准的`for`循环：
+
+```js
+var myArray = [1,2,3];
+
+for(var i=0;i < myArray.length; i++){
+  console.log(myArray[i]);
+}
+
+// 1 2 3
+```
+
+但是这并没有迭代所有的值，而是迭代了所有的下标，然后由你使用索引来引用值，比如`myArray[i]`。
+
+ES5还为数组加入了这个迭代帮助方法，包括`forEach(..)`、`every(..)`、`some(..)`。这些帮助方法的每一个都接收一个回调函数，这个函数将施用于数组中的每一个元素，仅在如何响应回调的返回值上有所不同。
+
+`forEach(..)`将会迭代数组中所有的值，并且忽略回调的返回值。`every(..)`会一直迭代到最后，或者当回调返回一个`false`值，而`some(..)`会一直迭代到最后，或者当回调返回一个`true`值。
+
+这些在`every(..)`和`some(..)`内部的特殊返回值有些像普通`for`循环中的`break`语句，它们可以在迭代执行到末尾之前将它结束掉。
+
+如果你使用`for..in`循环在一个对象上进行迭代，你也只能间接地得到值，因为它实际上仅仅迭代对象的所有可枚举属性，让你自己手动的去访问属性来得到值。
+
+**注意**：与以有序数字的方式(`for`循环或其他迭代器)迭代数组的下标比起来，迭代对象属性的顺讯是不确定的，而且可能会因为JS引擎的不同而不同。对于需要跨平台环境保持一致的问题，**不要依赖**观察到的顺序，因为这个顺序是不可靠的。
+
+但是如果你想直接迭代值，而不是数组下标(或者对象属性)呢？ES6加入了一个有用的`for..of`循环语法，用来迭代数组(和对象，如果这个对象有定义的迭代器):
+
+```js
+var myArray = [1,2,3];
+
+for(var v of myArray){
+  console.log(v);
+}
+
+//1
+//2
+//3
+```
+
+`for..of`循环要求被迭代的东西提供一个迭代器对象(从一个在语言规范中叫做`@@interator`的默认内部函数那里得到)，每次循环都调用一次这个迭代器对象的`next()`方法循环迭代的内容就是这些连续的返回值。
+
+数组拥有内建的`@@interator`，所以正如展示的那样，`for..of`对于它们很容易使用。但是让我们使用内建的`@@interator`来手动迭代一个数组，看看它是怎么工作的：
+
+```js
+var myArray = [1,2,3];
+var it = myArray[Symbol.iterator]();
+
+it.next(); // {value:1, done:false}
+it.next(); // {value:2, done:false}
+it.next(); // {value:3, done:false}
+it.next(); // {done:true}
+```
