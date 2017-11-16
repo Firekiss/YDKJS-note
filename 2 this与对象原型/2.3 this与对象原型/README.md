@@ -34,11 +34,11 @@ myObj.key = value;
 * boolean
 * null
 * undefiend
-* objectt
+* object
 
 **注意**:简单基本类型(string, number, boolean, null 和 undefined)自身不是object。null 有时会被当成一个对象类型，但是这种误解源自于一个语言中的Bug,它使得typeof null 错误地(而且令人困惑地)返回字符串"object"。实际上，null 是它自己的基本类型。
 
-**一个常见的错误论断是"JavaScript中的一切都是对象"。这明显是不对的。**
+**一个常见的错误论断是"JavaScript中的一切都是对象"。这明显是不对的**。
 
 对比来看，存在几种特殊的对象子类型，我们可以称之为复杂基本类型。
 
